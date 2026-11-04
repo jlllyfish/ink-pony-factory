@@ -2,7 +2,7 @@
 // ════════════════════════════════════════════════════════════════
 // Configuration
 // ════════════════════════════════════════════════════════════════
-const VERSION = "p7.10";
+const VERSION = "p7.11";
 const TABLE_MODELES = "Modeles_PDF";
 const COLS_MODELE = { nom: "Nom", contenu: "Contenu", tableRef: "Table_cible", tableNom: "Table_cible_nom",
                       images: "Images", mode: "Mode", nomFichier: "Nom_fichier", miseEnPage: "Mise_en_page" };
@@ -475,11 +475,11 @@ function majApercuNom() {
  "mep-sans-entete", "mep-sans-pied", "mep-col-libelle"]
   .forEach((id) => $(id).addEventListener("change", lireFormulaireMep));
 $("mep-nom-fichier").addEventListener("input", () => { modeleNomFichier = $("mep-nom-fichier").value; majApercuNom(); });
-$("btn-mise-en-page").addEventListener("click", () => {
-  const p = $("panneau-mep");
-  p.hidden = !p.hidden;
-  $("btn-mise-en-page").classList.toggle("actif", !p.hidden);
-});
+function afficherMep(visible) {
+  $("panneau-mep").hidden = !visible;
+  $("btn-mise-en-page").classList.toggle("actif", visible);
+}
+$("btn-mise-en-page").addEventListener("click", () => afficherMep($("panneau-mep").hidden));
 $("mep-defaut").addEventListener("click", () => {
   mep = structuredClone(MEP_DEFAUT);
   remplirFormulaireMep();
@@ -1728,8 +1728,10 @@ function remplirTables() {
 
 console.log(`[Pony Factory] version ${VERSION} chargée`);
 $("etat-sauvegarde").title = `Version ${VERSION}`;
+$("version-widget").textContent = `Pony Factory ${VERSION}`;
 
-grist.ready({ requiredAccess: "full" });
+// onEditOptions : affiche le bouton « Ouvrir la configuration » dans le panneau de Grist
+grist.ready({ requiredAccess: "full", onEditOptions: () => afficherMep(true) });
 
 grist.onRecords(async (recs) => {
   recsLies = recs || [];
