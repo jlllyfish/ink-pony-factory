@@ -18,6 +18,6 @@ Seul `grist-plugin-api.js` reste externe : il est chargé depuis l'instance Gris
 
 1. Modifier les versions dans `package.json` (et dans `tiptap-entry.js` si une extension TipTap est ajoutée).
 2. Lancer `./maj.sh` (nécessite Node.js) : le script télécharge les paquets npm, régénère les fichiers et nettoie.
-3. Tester le widget, puis incrémenter `VERSION` dans `app.js`, le `?v=` de `app.js` dans `index_pdf.html`, et le paramètre `?v=` de l'URL des widgets.
+3. Tester le widget, puis fusionner sur `main` : le numéro de version est attribué automatiquement à la publication.
 
 Le script est reproductible : relancé sans changer les versions, il produit des fichiers identiques.

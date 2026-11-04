@@ -2,7 +2,12 @@
 // ════════════════════════════════════════════════════════════════
 // Configuration
 // ════════════════════════════════════════════════════════════════
-const VERSION = "p8.0";
+// Version : lue dans l'URL de ce fichier (app.js?v=…), écrite par la publication automatique.
+// « dev » quand le widget est servi sans publication (test local).
+const VERSION = (() => {
+  const v = new URL(import.meta.url).searchParams.get("v");
+  return v && v !== "__VERSION__" ? v : "dev";
+})();
 const TABLE_MODELES = "Modeles_PDF";
 const COLS_MODELE = { nom: "Nom", contenu: "Contenu", tableRef: "Table_cible", tableNom: "Table_cible_nom",
                       images: "Images", mode: "Mode", nomFichier: "Nom_fichier", miseEnPage: "Mise_en_page" };
