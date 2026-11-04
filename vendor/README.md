@@ -12,12 +12,12 @@ Le widget a l'accès complet aux documents Grist : tout le code qu'il exécute e
 
 Les textes de licence sont dans `licences/`.
 
-Seul `grist-plugin-api.js` reste chargé depuis `docs.getgrist.com` (code de Grist lui-même).
+Seul `grist-plugin-api.js` reste externe : il est chargé depuis l'instance Grist de l'État (`grist.numerique.gouv.fr`), qui détient déjà les données. Il n'est pas embarqué ici, pour rester aligné sur la version de Grist en service.
 
 ## Mettre à jour
 
 1. Modifier les versions dans `package.json` (et dans `tiptap-entry.js` si une extension TipTap est ajoutée).
 2. Lancer `./maj.sh` (nécessite Node.js) : le script télécharge les paquets npm, régénère les fichiers et nettoie.
-3. Tester le widget, puis incrémenter `VERSION` dans `index_pdf.html` et le paramètre `?v=` de l'URL des widgets.
+3. Tester le widget, puis incrémenter `VERSION` dans `app.js`, le `?v=` de `app.js` dans `index_pdf.html`, et le paramètre `?v=` de l'URL des widgets.
 
 Le script est reproductible : relancé sans changer les versions, il produit des fichiers identiques.

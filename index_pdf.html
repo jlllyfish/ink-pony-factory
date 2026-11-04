@@ -3,17 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <!-- Politique de sécurité du contenu : n'autorise que le code de ce dépôt et l'API Grist.
-     connect-src liste les instances Grist d'où sont téléchargées les pièces jointes :
-     ajouter ici une autre instance si le widget y est utilisé.
+     script-src : grist-plugin-api.js est chargé depuis l'instance Grist de l'État, pas depuis
+     docs.getgrist.com (aucun tiers de plus que le serveur qui détient déjà les données).
+     connect-src liste les instances Grist d'où sont téléchargées les pièces jointes, nommément
+     (pas de joker *.getgrist.com) : ajouter ici une autre instance si le widget y est utilisé.
      'unsafe-eval' : imposé par grist-plugin-api.js, publié par Grist sous forme d'un paquet
      webpack qui exécute ses modules via eval(). Le code du widget, lui, n'utilise pas eval. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://docs.getgrist.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: https://grist.numerique.gouv.fr https://docs.getgrist.com https://*.getgrist.com; frame-src blob:; object-src 'self' blob:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' https://grist.numerique.gouv.fr; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: https://grist.numerique.gouv.fr https://docs.getgrist.com; frame-src blob:; object-src 'self' blob:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pony Factory – Publipostage PDF pour Grist</title>
 <!-- Bibliothèques embarquées dans vendor/ (versions figées, voir vendor/README.md) -->
 <link rel="stylesheet" href="vendor/dsfr/dsfr.min.css">
 <link rel="stylesheet" href="vendor/remixicon/remixicon.css">
-<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://grist.numerique.gouv.fr/grist-plugin-api.js"></script>
 <script src="vendor/pdfmake.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
 <script src="marianne.js"></script>
@@ -318,6 +320,6 @@
 
 <!-- Code du widget. Après modification de app.js : changer VERSION dans app.js
      ET le ?v= ci-dessous, pour que les navigateurs ne gardent pas l'ancienne version en cache. -->
-<script type="module" src="app.js?v=p7.9"></script>
+<script type="module" src="app.js?v=p7.10"></script>
 </body>
 </html>
