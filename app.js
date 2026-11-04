@@ -1,8 +1,8 @@
-// Pony Factory — code du widget (chargé par index_pdf.html)
+// ink — code du widget (chargé par index_pdf.html)
 // ════════════════════════════════════════════════════════════════
 // Configuration
 // ════════════════════════════════════════════════════════════════
-const VERSION = "p7.11";
+const VERSION = "p8.0";
 const TABLE_MODELES = "Modeles_PDF";
 const COLS_MODELE = { nom: "Nom", contenu: "Contenu", tableRef: "Table_cible", tableNom: "Table_cible_nom",
                       images: "Images", mode: "Mode", nomFichier: "Nom_fichier", miseEnPage: "Mise_en_page" };
@@ -1570,7 +1570,7 @@ function documentPdfmake(html) {
     footer: (page, total) => (mep.sansPremiere && page === 1) ? null
       : zoneMarge(mep.pied, page, total, Math.max(8, m.bas * PT - 28)),
     content: content.length ? content : [{ text: "" }],
-    info: { title: modele?.[COLS_MODELE.nom] || "Document", creator: "Pony Factory" },
+    info: { title: modele?.[COLS_MODELE.nom] || "Document", creator: "ink" },
   };
 }
 let policesPretes = false;
@@ -1726,9 +1726,9 @@ function remplirTables() {
     : `<option value="">Aucune table</option>`;
 }
 
-console.log(`[Pony Factory] version ${VERSION} chargée`);
+console.log(`[ink] version ${VERSION} chargée`);
 $("etat-sauvegarde").title = `Version ${VERSION}`;
-$("version-widget").textContent = `Pony Factory ${VERSION}`;
+$("version-widget").textContent = `ink ${VERSION}`;
 
 // onEditOptions : affiche le bouton « Ouvrir la configuration » dans le panneau de Grist
 grist.ready({ requiredAccess: "full", onEditOptions: () => afficherMep(true) });
@@ -1757,7 +1757,7 @@ async function init() {
           .filter(Boolean).join(" ; ");
       statut("");
       if (!confirm(`${quoi}\n\nCréer ou corriger automatiquement la table ${TABLE_MODELES} ?`))
-        return alerte(`Pony Factory a besoin de la table ${TABLE_MODELES}. Rechargez le widget pour relancer l'installation.`);
+        return alerte(`ink a besoin de la table ${TABLE_MODELES}. Rechargez le widget pour relancer l'installation.`);
       statut("Installation…");
       await installerTable(etat);
       etat = await chargerMeta();
