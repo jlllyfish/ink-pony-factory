@@ -1,0 +1,44 @@
+# Publie le widget sur GitHub Pages à chaque fusion sur main.
+# Le numéro de version (date + commit) remplace __VERSION__ dans index_pdf.html :
+# il change à chaque publication, ce qui force les navigateurs à recharger app.js.
+# Prérequis (une fois) : Settings → Pages → Source : « GitHub Actions ».
+name: Publication
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Numéro de version
+        run: |
+          V="$(TZ=Europe/Paris date +%Y.%m.%d)-${GITHUB_SHA::7}"
+          sed -i "s/__VERSION__/$V/g" index_pdf.html
+          grep -q "app.js?v=$V" index_pdf.html
+          echo "Version publiée : $V" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deploiement
+        uses: actions/deploy-pages@v4

@@ -319,8 +319,8 @@
 <div id="pop-images" class="pop" hidden></div>
 <div id="menu-suggest" class="pop suggest" hidden></div>
 
-<!-- Code du widget. Après modification de app.js : changer VERSION dans app.js
-     ET le ?v= ci-dessous, pour que les navigateurs ne gardent pas l'ancienne version en cache. -->
-<script type="module" src="app.js?v=p8.0"></script>
+<!-- Code du widget. __VERSION__ est remplacé automatiquement à chaque publication
+     (.github/workflows/publication.yml) : rien à modifier à la main. -->
+<script type="module" src="app.js?v=__VERSION__"></script>
 </body>
 </html>
