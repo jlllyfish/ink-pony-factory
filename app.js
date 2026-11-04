@@ -2,7 +2,7 @@
 // ════════════════════════════════════════════════════════════════
 // Configuration
 // ════════════════════════════════════════════════════════════════
-const VERSION = "p7.9";
+const VERSION = "p7.10";
 const TABLE_MODELES = "Modeles_PDF";
 const COLS_MODELE = { nom: "Nom", contenu: "Contenu", tableRef: "Table_cible", tableNom: "Table_cible_nom",
                       images: "Images", mode: "Mode", nomFichier: "Nom_fichier", miseEnPage: "Mise_en_page" };
@@ -137,7 +137,7 @@ function jeton(complet) {
 async function tenterPJ(id, complet, renouveler = false) {
   if (renouveler) JETONS[complet ? "complet" : "lecture"] = null;
   const { token, baseUrl } = await jeton(complet);
-  return fetch(`${baseUrl}/attachments/${id}/download?auth=${token}`);
+  return fetch(`${baseUrl}/attachments/${id}/download?auth=${encodeURIComponent(token)}`);
 }
 const refuse = (r) => r.status === 401 || r.status === 403;
 async function telechargerPJ(id) {

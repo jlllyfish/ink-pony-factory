@@ -21,4 +21,4 @@ node -e '
     `@font-face {\n  font-family: "remixicon";\n  src: url("remixicon.woff2") format("woff2"), url("remixicon.woff") format("woff");\n  font-display: swap;\n}`);
   fs.writeFileSync("remixicon/remixicon.css", css);'
 rm -rf node_modules package-lock.json
-echo "vendor/ régénéré. Pensez à mettre à jour les empreintes SRI (README.md)."
+echo "vendor/ régénéré. Testez le widget, puis incrémentez VERSION (app.js) et les paramètres ?v= (voir README.md)."
