@@ -23,6 +23,28 @@ const TYPES_MODELE = {
   Mise_en_page:    { type: "Text", label: "Mise en page" },
   Images:          { type: "Attachments", label: "Images" },
 };
+// Archivage : chaque PDF généré peut être déposé dans Documents_PDF.
+// Une ligne par couple (modèle, clé) : régénérer remplace le PDF précédent.
+const TABLE_DOCS = "Documents_PDF";
+const COLS_DOC = { cle: "Cle", fichier: "Fichier", lien: "Lien", modele: "Modele", table: "Table_source",
+                   ligne: "Ligne_source", mode: "Mode", nb: "Nb_lignes", le: "Genere_le", par: "Genere_par" };
+const TYPES_DOC = {
+  Cle:          { type: "Text", label: "Clé" },
+  Fichier:      { type: "Attachments", label: "Fichier" },
+  Lien:         { type: "Text", label: "Lien", widgetOptions: JSON.stringify({ widget: "HyperLink" }) },
+  Modele:       { type: `Ref:${TABLE_MODELES}`, label: "Modèle" },
+  Table_source: { type: "Text", label: "Table source" },
+  Ligne_source: { type: "Int", label: "Ligne source" },
+  Mode:         { type: "Choice", label: "Mode",
+                  widgetOptions: JSON.stringify({ choices: ["Fiche", "Rapport"], choiceOptions: {} }) },
+  Nb_lignes:    { type: "Int", label: "Nombre de lignes" },
+  Genere_le:    { type: "DateTime:Europe/Paris", label: "Généré le" },
+  Genere_par:   { type: "Text", label: "Généré par" },
+};
+// Formules déclenchées : recalculées à la création et à chaque remplacement (recalcWhen 2 = mises à jour manuelles)
+const DECLENCHEES_DOC = { Genere_le: "NOW()", Genere_par: "user.Name" };
+const CLE_RAPPORT = "(rapport)";
+const TYPES_CLE = ["Text", "Int", "Choice"];
 const DELAI_SAUVEGARDE = 1500;
 const ICONES_TYPE = { Text: "ri-text", Numeric: "ri-hashtag", Int: "ri-hashtag", Date: "ri-calendar-line", DateTime: "ri-time-line",
   Bool: "ri-checkbox-line", Choice: "ri-list-check", ChoiceList: "ri-list-check-2", Ref: "ri-links-line", RefList: "ri-links-line" };
@@ -34,6 +56,7 @@ const MEP_DEFAUT = {
   enTete: { g: "", c: "", d: "" },
   pied: { g: "", c: "", d: "" },
   sansPremiere: false, colLibelle: null,
+  archive: false, colCle: null,
 };
 const CONTENU_VIDE = { type: "doc", content: [
   { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Titre du document" }] },
@@ -180,7 +203,7 @@ async function chargerGalerie() {
 async function chargerMeta() {
   const [t, c] = await Promise.all([grist.docApi.fetchTable("_grist_Tables"), grist.docApi.fetchTable("_grist_Tables_column")]);
   TABLES = t.id.map((ref, i) => ({ ref, tableId: t.tableId[i], resume: t.summarySourceTable[i] }))
-    .filter((x) => !x.resume && !x.tableId.startsWith("GristHidden_") && x.tableId !== TABLE_MODELES)
+    .filter((x) => !x.resume && !x.tableId.startsWith("GristHidden_") && x.tableId !== TABLE_MODELES && x.tableId !== TABLE_DOCS)
     .sort((a, b) => a.tableId.localeCompare(b.tableId));
   META_COLS = c.id.map((ref, i) => ({ ref, parent: c.parentId[i], pos: c.parentPos[i], colId: c.colId[i],
     label: c.label[i] || c.colId[i], type: c.type[i], displayCol: c.displayCol[i] }));
@@ -395,6 +418,8 @@ function normaliserMep(brut) {
   }
   m.sansPremiere = !!brut.sansPremiere;
   m.colLibelle = Number.isInteger(brut.colLibelle) ? brut.colLibelle : null;
+  m.archive = !!brut.archive;
+  m.colCle = Number.isInteger(brut.colCle) ? brut.colCle : null;
   return m;
 }
 function remplirColLibelle() {
@@ -418,6 +443,8 @@ function remplirFormulaireMep() {
   $("mep-sans-pied").checked = !Object.values(mep.pied).some(Boolean);
   colLibelle = mep.colLibelle;
   remplirColLibelle();
+  $("mep-archive").checked = mep.archive;
+  remplirColCle();
   majBlocsMep();
   majApercuNom();
 }
@@ -427,6 +454,7 @@ function majBlocsMep() {
     $(b).style.opacity = off ? ".4" : "1";
     $(b).querySelectorAll("input").forEach((i) => (i.disabled = off));
   }
+  majBlocArchive();
 }
 function lireFormulaireMep() {
   const modeAvant = modeDoc;
@@ -438,6 +466,8 @@ function lireFormulaireMep() {
     pied: $("mep-sans-pied").checked ? {} : { g: $("mep-pg").value, c: $("mep-pc").value, d: $("mep-pd").value },
     sansPremiere: $("mep-sans-premiere").checked,
     colLibelle: Number($("mep-col-libelle").value) || null,
+    archive: $("mep-archive").checked,
+    colCle: Number($("mep-col-cle").value) || null,
   });
   colLibelle = mep.colLibelle;
   majBlocsMep();
@@ -477,7 +507,7 @@ function majApercuNom() {
 }
 ["mep-mode", "mep-format", "mep-orientation", "mep-police", "mep-haut", "mep-bas", "mep-gauche", "mep-droite",
  "mep-eg", "mep-ec", "mep-ed", "mep-pg", "mep-pc", "mep-pd", "mep-sans-premiere", "mep-nom-fichier",
- "mep-sans-entete", "mep-sans-pied", "mep-col-libelle"]
+ "mep-sans-entete", "mep-sans-pied", "mep-col-libelle", "mep-archive", "mep-col-cle"]
   .forEach((id) => $(id).addEventListener("change", lireFormulaireMep));
 $("mep-nom-fichier").addEventListener("input", () => { modeleNomFichier = $("mep-nom-fichier").value; majApercuNom(); });
 function afficherMep(visible) {
@@ -486,7 +516,8 @@ function afficherMep(visible) {
 }
 $("btn-mise-en-page").addEventListener("click", () => afficherMep($("panneau-mep").hidden));
 $("mep-defaut").addEventListener("click", () => {
-  mep = structuredClone(MEP_DEFAUT);
+  // L'archivage n'est pas de la mise en page : on le conserve
+  mep = { ...structuredClone(MEP_DEFAUT), archive: mep.archive, colCle: mep.colCle };
   remplirFormulaireMep();
   lireFormulaireMep();
 });
@@ -506,6 +537,7 @@ function appliquerMode() {
   $("bloc-nav").style.opacity = r ? ".5" : "1";
   $("bloc-nav").title = r ? "En mode Rapport, toutes les lignes affichées sont utilisées." : "";
   afficherCalculs();
+  majBlocArchive();
   majNav();
 }
 
@@ -1234,6 +1266,7 @@ async function choisirTable(ref) {
   afficherChamps();
   afficherCalculs();
   remplirColLibelle();
+  remplirColCle();
   rafraichirTags();
   await chargerEnregistrements();
 }
@@ -1654,16 +1687,169 @@ function basculerApercu() {
 }
 $("btn-apercu").addEventListener("click", basculerApercu);
 
+// ════════════════════════════════════════════════════════════════
+// Archivage dans Grist (table Documents_PDF)
+// ════════════════════════════════════════════════════════════════
+const colCle = () => COLS.get(mep.colCle) || null;
+function exprCle(col) { return typeBase(col.type) === "Int" ? `str($${col.colId})` : `$${col.colId}`; }
+function remplirColCle() {
+  const choix = COLONNES.filter((c) => TYPES_CLE.includes(typeBase(c.type)));
+  $("mep-col-cle").innerHTML = `<option value="">— Choisir une colonne —</option>` +
+    choix.map((c) => `<option value="${c.ref}">${esc(c.label)}</option>`).join("");
+  $("mep-col-cle").value = choix.some((c) => c.ref === mep.colCle) ? String(mep.colCle) : "";
+  majBlocArchive();
+}
+function majBlocArchive() {
+  const actif = $("mep-archive").checked;
+  const r = estRapport();
+  $("bloc-archive").hidden = !actif;
+  $("champ-cle").hidden = r;
+  $("aide-archive").textContent = r
+    ? "Un seul rapport archivé par modèle : chaque génération remplace le précédent."
+    : "Une ligne d'archive par valeur de la clé : régénérer un document remplace l'ancien PDF. "
+      + "Choisissez une colonne sans doublon ni valeur vide (numéro, identifiant…). Le bouton « 1 PDF » n'est pas archivé.";
+  const col = colCle();
+  const formule = !modele ? "" : r
+    ? `${TABLE_DOCS}.lookupOne(Modele=${modele.id}).Lien`
+    : col ? `${TABLE_DOCS}.lookupOne(Modele=${modele.id}, Cle=${exprCle(col)}).Lien` : "";
+  $("formule-archive").textContent = formule;
+  $("bloc-formule").hidden = !formule;
+}
+
+// Crée Documents_PDF, ou complète ses colonnes manquantes ou mal typées
+async function assurerTableDocs() {
+  const [t, c] = await Promise.all([grist.docApi.fetchTable("_grist_Tables"), grist.docApi.fetchTable("_grist_Tables_column")]);
+  const ref = t.id.find((_, i) => t.tableId[i] === TABLE_DOCS);
+  const parCol = new Map();
+  if (ref) c.id.forEach((_, i) => { if (c.parentId[i] === ref) parCol.set(c.colId[i], typeBase(c.type[i])); });
+  const manquantes = Object.keys(TYPES_DOC).filter((k) => !parCol.has(k));
+  const mauvais = Object.keys(TYPES_DOC).filter((k) => parCol.has(k) && parCol.get(k) !== typeBase(TYPES_DOC[k].type));
+  if (ref && !manquantes.length && !mauvais.length) return;
+  const actions = [];
+  if (!ref) actions.push(["AddTable", TABLE_DOCS, Object.entries(TYPES_DOC).map(([id, def]) => ({ id, ...def, isFormula: false }))]);
+  else {
+    for (const k of manquantes) actions.push(["AddColumn", TABLE_DOCS, k, { ...TYPES_DOC[k], isFormula: false }]);
+    for (const k of mauvais) actions.push(["ModifyColumn", TABLE_DOCS, k, { ...TYPES_DOC[k] }]);
+  }
+  for (const [k, formula] of Object.entries(DECLENCHEES_DOC))
+    if (!ref || manquantes.includes(k)) actions.push(["ModifyColumn", TABLE_DOCS, k, { formula, recalcWhen: 2, recalcDeps: null }]);
+  await grist.docApi.applyUserActions(actions);
+}
+$("mep-archive").addEventListener("change", async () => {
+  if (!$("mep-archive").checked) return;
+  try { statut("Préparation de la table d'archive…"); await assurerTableDocs(); statut(""); }
+  catch (e) {
+    statut("");
+    $("mep-archive").checked = false;
+    lireFormulaireMep();
+    alerte(`Création de la table ${TABLE_DOCS} impossible : ${e.message}`);
+  }
+});
+
+// Dépose un fichier dans les pièces jointes du document (jeton complet obligatoire)
+async function deposerPJ(blob, nom) {
+  let r, base;
+  for (const renouveler of [false, true]) {
+    if (renouveler) JETONS.complet = null;   // jeton expiré pendant un long lot
+    const { token, baseUrl } = await jeton(true);
+    base = baseUrl;
+    const fd = new FormData();
+    fd.append("upload", blob, nom);
+    // Avec un jeton ?auth=, Grist exige cet en-tête sur toute écriture (protection CSRF) :
+    // sans lui, il répond 401 sans en-têtes CORS et le navigateur n'affiche que « Failed to fetch ».
+    r = await fetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`,
+      { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } });
+    if (!refuse(r)) break;
+  }
+  if (!r.ok) throw new Error(`Dépôt de ${nom} : HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
+  const [id] = await r.json();
+  if (!Number.isInteger(id)) throw new Error(`Dépôt de ${nom} : réponse inattendue de Grist`);
+  return { id, url: `${base}/attachments/${id}/download` };
+}
+
+// Calcule les clés d'archive avant toute génération ; refuse les clés vides ou en double,
+// qui feraient écraser le PDF d'une autre ligne.
+function cleDe(rec, col) {
+  const v = brute(rec, col);
+  return v === null || v === undefined ? "" : String(v);
+}
+function planArchive(recs) {
+  if (!mep.archive) return null;
+  if (!modele) throw new Error("Aucun modèle ouvert.");
+  if (estRapport()) return [{ cle: CLE_RAPPORT, ligne: null, nb: recs.length }];
+  const col = colCle();
+  if (!col) throw Object.assign(new Error("Archivage : choisissez la colonne clé unique (Mise en page › Archivage dans Grist)."), { archive: true });
+  const compte = new Map();
+  for (const r of enregistrements) { const k = cleDe(r, col); compte.set(k, (compte.get(k) || 0) + 1); }
+  const plan = recs.map((r) => ({ cle: cleDe(r, col), ligne: r.id, nb: 1 }));
+  const vides = plan.filter((p) => p.cle === "").length;
+  const doublons = [...new Set(plan.map((p) => p.cle).filter((k) => k !== "" && compte.get(k) > 1))];
+  if (vides || doublons.length) {
+    const quoi = [vides ? `${vides} ligne(s) sans valeur` : "",
+      doublons.length ? `valeur(s) en double : ${doublons.slice(0, 5).map((k) => `« ${k} »`).join(", ")}${doublons.length > 5 ? "…" : ""}` : ""]
+      .filter(Boolean).join(" ; ");
+    throw Object.assign(new Error(`Archivage impossible, la colonne clé « ${col.label} » doit être unique et remplie : ${quoi}. `
+      + "Corrigez les données ou décochez l'archivage."), { archive: true });
+  }
+  return plan;
+}
+// Dépose les PDF puis crée ou remplace les lignes d'archive en une seule action Grist
+async function archiver(plan, fichiers) {
+  await assurerTableDocs();
+  const existants = colonnesEnLignes(await grist.docApi.fetchTable(TABLE_DOCS));
+  const parCle = new Map(existants.filter((d) => d[COLS_DOC.modele] === modele.id).map((d) => [String(d[COLS_DOC.cle] ?? ""), d.id]));
+  const ajouts = [], remplaces = [];
+  for (let i = 0; i < plan.length; i++) {
+    if (plan.length > 1) statut(`Archivage ${i + 1} / ${plan.length}…`);
+    const { blob, nom } = fichiers[i];
+    const pj = await deposerPJ(blob, nom);
+    const ligne = {
+      [COLS_DOC.cle]: plan[i].cle, [COLS_DOC.fichier]: ["L", pj.id], [COLS_DOC.lien]: `${nom} ${pj.url}`,
+      [COLS_DOC.modele]: modele.id, [COLS_DOC.table]: tableCourante?.tableId ?? "", [COLS_DOC.ligne]: plan[i].ligne,
+      [COLS_DOC.mode]: modeDoc, [COLS_DOC.nb]: plan[i].nb,
+    };
+    const id = parCle.get(plan[i].cle);
+    (id ? remplaces : ajouts).push({ id, ligne });
+  }
+  const colonnes = (liste) => Object.fromEntries(Object.values(COLS_DOC)
+    .filter((k) => k in liste[0].ligne).map((k) => [k, liste.map((x) => x.ligne[k])]));
+  const actions = [];
+  if (ajouts.length) actions.push(["BulkAddRecord", TABLE_DOCS, ajouts.map(() => null), colonnes(ajouts)]);
+  if (remplaces.length) actions.push(["BulkUpdateRecord", TABLE_DOCS, remplaces.map((x) => x.id), colonnes(remplaces)]);
+  await grist.docApi.applyUserActions(actions);
+  return { ajouts: ajouts.length, remplaces: remplaces.length };
+}
+function bilanArchive(b) {
+  const n = b.ajouts + b.remplaces;
+  return `${n} PDF archivé(s) dans ${TABLE_DOCS}${b.remplaces ? ` (${b.remplaces} remplacé(s))` : ""}`;
+}
+// Le téléchargement a déjà eu lieu : un échec ici ne doit pas passer pour un échec de génération
+async function archiverApresTelechargement(plan, fichiers) {
+  try { finir(bilanArchive(await archiver(plan, fichiers))); }
+  catch (e) { console.error(e); statut(""); alerte(`PDF téléchargé, mais archivage dans ${TABLE_DOCS} impossible : ${e.message}`); }
+}
+function echec(e) {
+  console.error(e);
+  statut("");
+  alerte(e.archive ? e.message : `Génération impossible : ${e.message}`);
+}
+const blobDe = (pdf) => new Promise((r) => pdf.getBlob(r));
+function finir(msg) { statut(msg); setTimeout(() => statut(""), 6000); }
+
 // ── Téléchargement ──
 $("btn-pdf").addEventListener("click", async () => {
   if (!enregistrements.length) return;
   const recs = estRapport() ? enregistrements : [enregistrements[index]];
-  statut("Génération du PDF…");
   try {
-    const pdf = await genererPdf(recs);
-    pdf.download(nomFichierCalcule(recs[0]));
-    statut("");
-  } catch (e) { console.error(e); statut(""); alerte(`Génération impossible : ${e.message}`); }
+    const plan = planArchive(recs);
+    statut("Génération du PDF…");
+    const nom = nomFichierCalcule(recs[0]);
+    const blob = await blobDe(await genererPdf(recs));
+    telecharger(blob, nom);
+    if (!plan) return statut("");
+    statut("Archivage…");
+    await archiverApresTelechargement(plan, [{ blob, nom }]);
+  } catch (e) { echec(e); }
 });
 
 $("btn-lot-un").addEventListener("click", async () => {
@@ -1683,23 +1869,26 @@ $("btn-lot-zip").addEventListener("click", async () => {
   if (n > 200 && !confirm(`${n} fichiers à générer. Cela peut prendre plusieurs minutes. Continuer ?`)) return;
   try {
     if (!globalThis.JSZip) throw new Error("JSZip n'est pas chargé.");
+    const plan = planArchive(enregistrements);
     const zip = new JSZip();
     const vus = new Map();
+    const fichiers = [];
     for (let i = 0; i < n; i++) {
       statut(`Génération ${i + 1} / ${n}…`);
-      const pdf = await genererPdf([enregistrements[i]]);
-      const blob = await new Promise((r) => pdf.getBlob(r));
-      let nom = nomFichierCalcule(enregistrements[i]);
-      const compte = (vus.get(nom) || 0) + 1;
-      vus.set(nom, compte);
-      if (compte > 1) nom = nom.replace(/\.pdf$/, `-${compte}.pdf`);
+      const blob = await blobDe(await genererPdf([enregistrements[i]]));
+      const nomBase = nomFichierCalcule(enregistrements[i]);
+      let nom = nomBase;
+      const compte = (vus.get(nomBase) || 0) + 1;
+      vus.set(nomBase, compte);
+      if (compte > 1) nom = nomBase.replace(/\.pdf$/, `-${compte}.pdf`);
       zip.file(nom, blob);
+      fichiers.push({ blob, nom });
     }
     statut("Compression de l'archive…");
     telecharger(await zip.generateAsync({ type: "blob" }), `${nomLot()}.zip`);
-    statut(`${n} fichier(s) dans l'archive`);
-    setTimeout(() => statut(""), 6000);
-  } catch (e) { console.error(e); statut(""); alerte(`Génération impossible : ${e.message}`); }
+    if (!plan) return finir(`${n} fichier(s) dans l'archive`);
+    await archiverApresTelechargement(plan, fichiers);
+  } catch (e) { echec(e); }
 });
 
 
