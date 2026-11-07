@@ -61,6 +61,7 @@
   .tags .fr-tag i { margin-right: .25rem; font-size: .85em; }
   .tag-agg { background: #FEE7FC !important; color: #6E445A !important; }
   .zone { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .formule { display: block; font-size: .7rem; background: #F6F6F6; padding: .3rem .4rem; border-radius: 4px; word-break: break-all; user-select: all; }
   #apercu-nom { font-size: .75rem; color: #000091; word-break: break-all; background: #F6F6F6; padding: .3rem .4rem; border-radius: 4px; }
 
   /* ── Barre d'outils de l'éditeur ── */
@@ -286,6 +287,18 @@
     <input id="mep-nom-fichier" type="text" placeholder="{modele}-{Nom}">
     <div id="apercu-nom"></div>
     <p class="aide">Entre accolades : un identifiant de colonne, ou {date} et {modele}. Le navigateur ne peut pas nommer le PDF tout seul : le nom est copié dans le presse-papiers à l'impression, il suffit de le coller.</p>
+
+    <h3>Archivage dans Grist</h3>
+    <label class="bascule"><input id="mep-archive" type="checkbox">Enregistrer chaque PDF généré dans la table Documents_PDF</label>
+    <div id="bloc-archive" hidden>
+      <label class="champ" id="champ-cle"><span>Colonne clé unique</span>
+        <select id="mep-col-cle"></select></label>
+      <p class="aide" id="aide-archive"></p>
+      <div id="bloc-formule" hidden>
+        <p class="aide">Pour afficher le lien dans la table source, ajoutez-y une colonne avec cette formule :</p>
+        <code id="formule-archive" class="formule"></code>
+      </div>
+    </div>
 
     <button class="fr-btn fr-btn--sm fr-btn--tertiary" id="mep-defaut"><i class="ri-arrow-go-back-line"></i>&nbsp;Valeurs par défaut</button>
     <p class="aide" id="version-widget" style="margin-top:auto; padding-top:.75rem; text-align:center"></p>
