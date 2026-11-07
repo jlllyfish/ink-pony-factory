@@ -1755,7 +1755,10 @@ async function deposerPJ(blob, nom) {
     base = baseUrl;
     const fd = new FormData();
     fd.append("upload", blob, nom);
-    r = await fetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`, { method: "POST", body: fd });
+    // Avec un jeton ?auth=, Grist exige cet en-tête sur toute écriture (protection CSRF) :
+    // sans lui, il répond 401 sans en-têtes CORS et le navigateur n'affiche que « Failed to fetch ».
+    r = await fetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`,
+      { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } });
     if (!refuse(r)) break;
   }
   if (!r.ok) throw new Error(`Dépôt de ${nom} : HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
