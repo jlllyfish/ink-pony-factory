@@ -113,6 +113,13 @@
   .pop-reglages label { display: flex; flex-direction: column; gap: .2rem; font-size: .72rem; color: #666; }
   .pop-reglages select, .pop-reglages input { border: 1px solid #CCC; border-radius: 4px; padding: 5px 8px; font: inherit; font-size: .85rem; background: #fff; color: #161616; width: 100%; }
   .pop-reglages .duo { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+  .pop-images { width: 300px; display: flex; flex-direction: column; gap: .5rem; }
+  .pop-images .titre { font-size: .8rem; font-weight: 700; color: #000091; }
+  .pop-images .titre:not(:first-child) { margin-top: .4rem; padding-top: .6rem; border-top: 1px solid #EEE; }
+  .pop-images label { display: flex; flex-direction: column; gap: .2rem; font-size: .72rem; color: #666; }
+  .pop-images select { border: 1px solid #CCC; border-radius: 4px; padding: 5px 8px; font: inherit; font-size: .85rem; background: #fff; color: #161616; width: 100%; }
+  .pop-images .fr-btn { align-self: flex-start; }
+  .pop-images .vide { max-width: none; }
   .galerie { display: flex; gap: .5rem; flex-wrap: wrap; max-width: 380px; }
   .galerie button { border: 1px solid #DDD !important; background: repeating-conic-gradient(#EEE 0 25%, #fff 0 50%) 0 0/12px 12px !important; padding: 2px !important; cursor: pointer; }
   .galerie button:hover { border-color: #000091 !important; }
@@ -224,7 +231,7 @@
       <span class="sep"></span>
       <button class="tb" id="btn-condition" title="Bloc conditionnel"><i class="ri-git-branch-line"></i></button>
       <button class="tb" id="btn-lien" title="Insérer ou modifier un lien"><i class="ri-link"></i></button>
-      <button class="tb" id="btn-images" title="Insérer une image"><i class="ri-image-line"></i></button>
+      <button class="tb" id="btn-images" title="Insérer une image (fixe ou selon la ligne)"><i class="ri-image-line"></i></button>
       <button class="tb" data-cmd="saut" title="Saut de page"><i class="ri-page-separator"></i></button>
       <button class="tb" data-cmd="effacer" title="Effacer la mise en forme"><i class="ri-format-clear"></i></button>
     </div>
@@ -329,7 +336,7 @@
   </div>
 </div>
 
-<div id="pop-images" class="pop" hidden></div>
+<div id="pop-images" class="pop pop-images" hidden></div>
 <div id="menu-suggest" class="pop suggest" hidden></div>
 
 <!-- Code du widget. __VERSION__ est remplacé automatiquement à chaque publication
