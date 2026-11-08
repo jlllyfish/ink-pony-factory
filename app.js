@@ -180,7 +180,14 @@ async function telechargerPJ(id) {
     if (r.ok) jetonCompletRequis = true;
   }
   if (!r.ok) throw new Error(`Pièce jointe ${id} : HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
-  return URL.createObjectURL(await r.blob());
+  return URL.createObjectURL(await typerImage(await r.blob()));
+}
+// Un SVG servi sans type image/svg+xml ne s'affiche pas : on le retype d'après son contenu
+async function typerImage(blob) {
+  if (blob.type.startsWith("image/")) return blob;
+  const debut = (await blob.slice(0, 512).text()).trimStart().toLowerCase();
+  const svg = debut.startsWith("<svg") || (debut.startsWith("<?xml") && debut.includes("<svg"));
+  return svg ? new Blob([blob], { type: "image/svg+xml" }) : blob;
 }
 function urlPJ(id) {
   if (!CACHE_PJ.has(id)) CACHE_PJ.set(id, telechargerPJ(id).catch((e) => { CACHE_PJ.delete(id); throw e; }));
@@ -195,6 +202,153 @@ async function chargerGalerie() {
     MODELES.forEach((m) => listeIds(m[COLS_MODELE.images]).forEach((id) => ids.add(id)));
     GALERIE = [...ids].map((id) => ({ id, nom: noms.get(id) || `Image ${id}` }));
   } catch (e) { console.warn("Galerie indisponible :", e); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// Images selon la ligne : pièce jointe lue dans une colonne de la table source,
+// ou dans la table liée par une colonne Référence (ex. Établissement › Logo).
+// Le nœud image porte imgCol (colonne source) et imgSub (colonne de la table liée).
+// ════════════════════════════════════════════════════════════════
+const metaCol = (ref) => META_COLS.find((c) => c.ref === ref) || null;
+const colonnesPJ = (tableRef) => META_COLS.filter((c) => c.parent === tableRef && typeBase(c.type) === "Attachments")
+  .sort((a, b) => a.pos - b.pos);
+function sourcesImages() {
+  if (!tableCourante) return [];
+  const directes = colonnesPJ(tableCourante.ref).map((c) => ({ col: c.ref, sub: null, libelle: c.label }));
+  const liees = COLONNES.filter((c) => ["Ref", "RefList"].includes(typeBase(c.type))).flatMap((c) => {
+    const cible = TABLES.find((t) => t.tableId === String(c.type).split(":")[1]);
+    return cible ? colonnesPJ(cible.ref).map((a) => ({ col: c.ref, sub: a.ref, libelle: `${c.label} › ${a.label}` })) : [];
+  });
+  return [...directes, ...liees];
+}
+// Chemin de lecture, ou null si une colonne a disparu ou changé de type
+function cheminImage(colRef, subRef) {
+  const col = metaCol(colRef);
+  if (!col || col.parent !== tableCourante?.ref) return null;
+  const t = typeBase(col.type);
+  if (!subRef) return t === "Attachments" ? { colId: col.colId, libelle: col.label } : null;
+  if (t !== "Ref" && t !== "RefList") return null;
+  const table = String(col.type).split(":")[1];
+  const sub = metaCol(subRef);
+  const cible = TABLES.find((x) => x.tableId === table);
+  if (!sub || !cible || sub.parent !== cible.ref || typeBase(sub.type) !== "Attachments") return null;
+  return { colId: col.colId, table, subColId: sub.colId, libelle: `${col.label} › ${sub.label}` };
+}
+// Première ligne pointée par une Référence ou une liste de Références
+function premiereRef(v) {
+  if (typeof v === "number") return v || null;
+  if (Array.isArray(v)) return v[0] === "L" ? premiereRef(v[1]) : v[0] === "R" ? (v[2] || null) : premiereRef(v[0]);
+  if (v && typeof v === "object") return v.rowId ?? v.id ?? null;
+  return null;
+}
+// Tables liées : relues au plus toutes les 10 s pour voir les logos ajoutés entre deux aperçus
+const CACHE_TABLES = new Map();
+function lignesTable(tableId) {
+  const c = CACHE_TABLES.get(tableId);
+  if (c && Date.now() - c.t < 10000) return c.p;
+  const p = grist.docApi.fetchTable(tableId).then((t) => new Map(colonnesEnLignes(t).map((r) => [r.id, r])));
+  p.catch(() => CACHE_TABLES.delete(tableId));
+  CACHE_TABLES.set(tableId, { t: Date.now(), p });
+  return p;
+}
+async function idImage(rec, chemin) {
+  if (!chemin) return null;
+  if (!chemin.table) return listeIds(rec[chemin.colId])[0] ?? null;
+  const id = premiereRef(rec[chemin.colId]);
+  if (!id) return null;
+  const ligne = (await lignesTable(chemin.table)).get(id);
+  return ligne ? listeIds(ligne[chemin.subColId])[0] ?? null : null;
+}
+// Dimensions réelles, pour inscrire l'image dans le cadre sans la déformer
+const CACHE_DIMS = new Map();
+function dimsPJ(id) {
+  if (!CACHE_DIMS.has(id)) {
+    CACHE_DIMS.set(id, urlPJ(id).then(async (url) => {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return { l: img.naturalWidth, h: img.naturalHeight };
+    }).catch((e) => { CACHE_DIMS.delete(id); throw e; }));
+  }
+  return CACHE_DIMS.get(id);
+}
+// Résolu avant la fusion (asynchrone), lu pendant la fusion (synchrone)
+const IMAGES_LIGNES = new Map();   // "ligne|col|sub" → { url, l, h } ou null
+const cleImage = (rec, col, sub) => `${rec.id}|${col}|${sub ?? ""}`;
+async function prechargerImagesLignes(html, recs) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const specs = new Map();
+  tmp.querySelectorAll("img[data-img-col]").forEach((img) => {
+    const col = Number(img.dataset.imgCol), sub = Number(img.dataset.imgSub) || null;
+    specs.set(`${col}|${sub ?? ""}`, { col, sub, chemin: cheminImage(col, sub) });
+  });
+  const taches = [];
+  for (const { col, sub, chemin } of specs.values()) {
+    for (const rec of recs) {
+      taches.push((async () => {
+        let res = null;
+        try {
+          const id = await idImage(rec, chemin);
+          if (id) {
+            const [url, d] = await Promise.all([urlPJ(id), dimsPJ(id)]);
+            res = { url, ...d };
+          }
+        } catch (e) { console.warn("Image de la ligne indisponible :", e); }
+        IMAGES_LIGNES.set(cleImage(rec, col, sub), res);
+      })());
+    }
+  }
+  await Promise.all(taches);
+}
+// Remplace chaque cadre par l'image de la ligne, inscrite dans le cadre ; pas d'image → rien
+function remplacerImagesLignes(racine, rec) {
+  racine.querySelectorAll("img[data-img-col]").forEach((img) => {
+    const col = Number(img.dataset.imgCol), sub = Number(img.dataset.imgSub) || null;
+    const res = rec && IMAGES_LIGNES.get(cleImage(rec, col, sub));
+    if (!res || !res.l || !res.h) return img.remove();
+    const cadreL = parseFloat(img.getAttribute("width")) || 200;
+    const cadreH = parseFloat(img.getAttribute("height")) || cadreL / 2;
+    const k = Math.min(cadreL / res.l, cadreH / res.h);
+    img.setAttribute("src", res.url);
+    img.setAttribute("width", String(Math.round(res.l * k)));
+    img.setAttribute("height", String(Math.round(res.h * k)));
+    img.removeAttribute("style");
+    delete img.dataset.imgCol;
+    delete img.dataset.imgSub;
+  });
+}
+// Cadre affiché dans l'éditeur à la place de l'image
+const CACHE_CADRES = new Map();
+function cadreImage(libelle) {
+  const cle = libelle ?? "";
+  if (!CACHE_CADRES.has(cle)) {
+    const coul = libelle ? "#000091" : "#CE0500";
+    const ligne2 = libelle ? esc(libelle.length > 26 ? `${libelle.slice(0, 25)}…` : libelle) : "Colonne introuvable";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">`
+      + `<rect x="1" y="1" width="198" height="98" rx="4" fill="#F5F5FE" stroke="${coul}" stroke-width="1.5" stroke-dasharray="6 4"/>`
+      + `<text x="100" y="44" font-family="Marianne, Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">Image selon la ligne</text>`
+      + `<text x="100" y="64" font-family="Marianne, Arial, sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="${coul}">${ligne2}</text></svg>`;
+    CACHE_CADRES.set(cle, URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })));
+  }
+  return CACHE_CADRES.get(cle);
+}
+const libelleImageLigne = (attrs) => cheminImage(attrs.imgCol, attrs.imgSub)?.libelle ?? null;
+// Met à jour les cadres (libellés, colonnes disparues) sans marquer le modèle comme modifié
+function peindreImagesLignes() {
+  if (!editor) return;
+  const tr = editor.state.tr;
+  editor.state.doc.descendants((n, pos) => {
+    if (n.type.name !== "image" || !n.attrs.imgCol) return;
+    const libelle = libelleImageLigne(n.attrs);
+    const src = cadreImage(libelle);
+    if (n.attrs.src !== src) tr.setNodeMarkup(pos, undefined, { ...n.attrs, src, alt: libelle || "Image selon la ligne" });
+  });
+  if (!tr.docChanged) return;
+  const etait = chargement;
+  chargement = true;
+  editor.view.dispatch(tr.setMeta("addToHistory", false));
+  chargement = etait;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -571,7 +725,7 @@ function nettoyerBlobs(n) {
   if (Array.isArray(n)) return n.map(nettoyerBlobs);
   if (!n || typeof n !== "object") return n;
   const c = { ...n };
-  if (c.type === "image" && c.attrs?.att) c.attrs = { ...c.attrs, src: null };
+  if (c.type === "image" && (c.attrs?.att || c.attrs?.imgCol)) c.attrs = { ...c.attrs, src: null };
   if (c.content) c.content = nettoyerBlobs(c.content);
   return c;
 }
@@ -950,6 +1104,8 @@ async function initEditeur() {
         ...this.parent?.(),
         att: { default: null, parseHTML: (el) => Number(el.getAttribute("data-att")) || null, renderHTML: (a) => (a.att ? { "data-att": a.att } : {}) },
         align: { default: null, parseHTML: (el) => el.getAttribute("data-align"), renderHTML: (a) => (a.align ? { "data-align": a.align } : {}) },
+        imgCol: { default: null, parseHTML: (el) => Number(el.getAttribute("data-img-col")) || null, renderHTML: (a) => (a.imgCol ? { "data-img-col": a.imgCol } : {}) },
+        imgSub: { default: null, parseHTML: (el) => Number(el.getAttribute("data-img-sub")) || null, renderHTML: (a) => (a.imgSub ? { "data-img-sub": a.imgSub } : {}) },
       };
     },
   }).configure({ resize: { enabled: true, directions: ["bottom-right", "bottom-left"], minWidth: 30, alwaysPreserveAspectRatio: true } });
@@ -1227,21 +1383,40 @@ $("champ-lien").addEventListener("keydown", (e) => {
   if (e.key === "Escape") { $("pop-lien").hidden = true; editor.commands.focus(); }
 });
 
+// Image sélectionnée « selon la ligne » : le menu sert alors à changer sa colonne
+function imageLigneSelectionnee() {
+  const sel = editor.state.selection;
+  const n = sel.node;
+  return n?.type.name === "image" && n.attrs.imgCol ? { pos: sel.from, node: n } : null;
+}
+let imageEnCours = null;   // { pos } quand on modifie une image selon la ligne
 $("btn-images").addEventListener("click", async () => {
   const pop = $("pop-images");
-  if (!GALERIE.length) {
-    pop.innerHTML = `<p class="vide">Aucune image disponible. Déposez des fichiers dans la colonne ${COLS_MODELE.images} de la table ${TABLE_MODELES}, puis cliquez sur Actualiser.</p>`;
-    return ouvrirPop(pop, $("btn-images"));
-  }
-  pop.innerHTML = `<div class="galerie">${GALERIE.map((g) => `<button type="button" data-att="${g.id}" title="${esc(g.nom)}"><img alt="${esc(g.nom)}"></button>`).join("")}</div>`;
+  if (!pop.hidden) return (pop.hidden = true);
+  const edition = imageLigneSelectionnee();
+  imageEnCours = edition ? { pos: edition.pos } : null;
+  const sources = sourcesImages();
+  const valeur = edition ? `${edition.node.attrs.imgCol}:${edition.node.attrs.imgSub ?? ""}` : "";
+  const fixe = edition ? "" : `<div class="titre">Image fixe</div>` + (GALERIE.length
+    ? `<div class="galerie">${GALERIE.map((g) => `<button type="button" data-att="${g.id}" title="${esc(g.nom)}"><img alt="${esc(g.nom)}"></button>`).join("")}</div>`
+    : `<p class="vide">Déposez des fichiers dans la colonne ${COLS_MODELE.images} de la table ${TABLE_MODELES}, puis cliquez sur Actualiser.</p>`);
+  const variable = `<div class="titre">Image selon la ligne</div>` + (sources.length
+    ? `<label><span>Colonne de l'image</span><select id="img-source">${sources.map((x) =>
+        `<option value="${x.col}:${x.sub ?? ""}">${esc(x.libelle)}</option>`).join("")}</select></label>
+       <button type="button" class="fr-btn fr-btn--sm" id="img-ligne-ok">${edition ? "Appliquer" : "Insérer"}</button>
+       <p class="vide">Un cadre est inséré : chaque document y place l'image de sa ligne, sans la déformer. Redimensionnez le cadre pour régler la taille maximale.</p>`
+    : `<p class="vide">Aucune colonne Pièces jointes dans la table source, ni dans une table liée par une colonne Référence.</p>`);
+  pop.innerHTML = fixe + variable;
   ouvrirPop(pop, $("btn-images"));
+  if (valeur && $("img-source")) $("img-source").value = valeur;
   for (const b of pop.querySelectorAll("[data-att]")) {
     urlPJ(Number(b.dataset.att)).then((u) => (b.querySelector("img").src = u))
       .catch((e) => { console.error(e); b.title = `Image indisponible : ${e.message}`; });
   }
 });
-$("pop-images").addEventListener("mousedown", (e) => e.preventDefault());
+$("pop-images").addEventListener("mousedown", (e) => { if (!["SELECT", "OPTION"].includes(e.target.tagName)) e.preventDefault(); });
 $("pop-images").addEventListener("click", async (e) => {
+  if (e.target.closest("#img-ligne-ok")) return insererImageLigne();
   const b = e.target.closest("[data-att]");
   if (!b) return;
   const id = Number(b.dataset.att), img = b.querySelector("img");
@@ -1251,6 +1426,23 @@ $("pop-images").addEventListener("click", async (e) => {
   editor.chain().focus().setImage({ src, att: id, alt: b.title, width: img.naturalWidth ? Math.min(img.naturalWidth, 250) : 200 }).run();
   $("pop-images").hidden = true;
 });
+function insererImageLigne() {
+  const [col, sub] = $("img-source").value.split(":").map((x) => Number(x) || null);
+  if (!col) return;
+  const attrs = { imgCol: col, imgSub: sub };
+  const libelle = libelleImageLigne(attrs);
+  Object.assign(attrs, { src: cadreImage(libelle), alt: libelle || "Image selon la ligne" });
+  const n = imageEnCours && editor.state.doc.nodeAt(imageEnCours.pos);
+  if (n?.type.name === "image" && n.attrs.imgCol) {
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(imageEnCours.pos, undefined, { ...n.attrs, ...attrs }));
+    editor.commands.focus();
+  } else {
+    editor.chain().focus().setImage({ ...attrs, width: 200, height: 100 }).run();
+  }
+  imageEnCours = null;
+  $("pop-images").hidden = true;
+  if (enApercu) rafraichirApercu();
+}
 
 // ════════════════════════════════════════════════════════════════
 // Table source et enregistrements
@@ -1268,6 +1460,7 @@ async function choisirTable(ref) {
   remplirColLibelle();
   remplirColCle();
   rafraichirTags();
+  peindreImagesLignes();
   await chargerEnregistrements();
 }
 async function chargerEnregistrements() {
@@ -1405,6 +1598,7 @@ function fusionner(html, rec) {
   tmp.innerHTML = html;
   appliquerConditions(tmp, rec);
   remplacerBalises(tmp, rec, [rec]);
+  remplacerImagesLignes(tmp, rec);
   entetesRepetees(tmp);
   return tmp.innerHTML;
 }
@@ -1419,12 +1613,14 @@ function fusionnerRapport(html, recs) {
       copie.removeAttribute("data-repete");
       appliquerConditions(copie, rec);
       remplacerBalises(copie, rec, recs);
+      remplacerImagesLignes(copie, rec);
       frag.appendChild(copie);
     });
     tr.replaceWith(frag);
   });
   appliquerConditions(tmp, recs[0]);
   remplacerBalises(tmp, recs[0], recs);
+  remplacerImagesLignes(tmp, recs[0]);
   entetesRepetees(tmp);
   return { html: tmp.innerHTML, lignesRepetees: lignes.length };
 }
@@ -1440,6 +1636,7 @@ function verifierCoherence(html, recs) {
 }
 async function corpsDocument(recs) {
   const base = await htmlModele();
+  await prechargerImagesLignes(base, recs);
   if (!estRapport()) return recs.map((r) => `<section class="fiche">${fusionner(base, r)}</section>`).join("");
   const { html, lignesRepetees } = fusionnerRapport(base, recs);
   if (!lignesRepetees) alerte("Aucune ligne répétée : marquez une ligne de tableau avec le bouton Répéter pour lister les enregistrements.", "warning");
@@ -1622,22 +1819,43 @@ function preparerPdfmake() {
                            italics: "Marianne-Italic.ttf", bolditalics: "Marianne-BoldItalic.ttf" } };
   policesPretes = true;
 }
-// pdfmake exige des images en base64 : les blob URL ne passent pas
+// pdfmake exige des images en base64 : les blob URL ne passent pas.
+// Il ne lit que PNG et JPEG : les autres formats (SVG, WebP, GIF…) sont convertis en PNG.
+async function dataUrlPdf(src) {
+  const blob = await (await fetch(src)).blob();
+  const tete = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const png = tete[0] === 0x89 && tete[1] === 0x50 && tete[2] === 0x4E && tete[3] === 0x47;
+  const jpeg = tete[0] === 0xFF && tete[1] === 0xD8;
+  if (png || jpeg) {
+    const b = new Blob([blob], { type: png ? "image/png" : "image/jpeg" });
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(b);
+    });
+  }
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  if (!img.naturalWidth || !img.naturalHeight) throw new Error("image sans dimensions");
+  // Petites images (SVG notamment) doublées pour rester nettes, grandes bornées à 2000 px
+  const cote = Math.max(img.naturalWidth, img.naturalHeight);
+  const k = Math.min(2000 / cote, cote < 600 ? 2 : 1);
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.naturalWidth * k);
+  c.height = Math.round(img.naturalHeight * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL("image/png");
+}
 async function htmlPourPdf(recs) {
   const tmp = document.createElement("div");
   tmp.innerHTML = await corpsDocument(recs);
   await Promise.all([...tmp.querySelectorAll("img")].map(async (img) => {
     const src = img.getAttribute("src");
     if (!src || src.startsWith("data:")) return;
-    try {
-      const blob = await (await fetch(src)).blob();
-      img.setAttribute("src", await new Promise((res, rej) => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result);
-        fr.onerror = rej;
-        fr.readAsDataURL(blob);
-      }));
-    } catch { img.remove(); }
+    try { img.setAttribute("src", await dataUrlPdf(src)); }
+    catch (e) { console.warn("Image ignorée dans le PDF :", e); img.remove(); }
   }));
   return tmp.innerHTML;
 }
