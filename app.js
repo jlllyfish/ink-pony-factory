@@ -51,13 +51,20 @@ const ICONES_TYPE = { Text: "ri-text", Numeric: "ri-hashtag", Int: "ri-hashtag",
 const FONCTIONS = { somme: "Somme", moyenne: "Moyenne", min: "Minimum", max: "Maximum" };
 const FORMATS = { a4: { l: 210, h: 297, css: "A4" }, a5: { l: 148, h: 210, css: "A5" }, letter: { l: 216, h: 279, css: "letter" } };
 const MEP_DEFAUT = {
-  format: "a4", orientation: "portrait", police: 11,
+  format: "a4", orientation: "portrait", police: 11, interligne: 1.35,
   marges: { haut: 20, bas: 20, gauche: 20, droite: 20 },
   enTete: { g: "", c: "", d: "" },
   pied: { g: "", c: "", d: "" },
   sansPremiere: false, colLibelle: null,
   archive: false, colCle: null,
 };
+// Interlignage, comme dans Word : 1 = simple (hauteur naturelle de la police), 2 = double.
+// pdfmake multiplie la hauteur naturelle de Marianne (ascendante + descendante = 1,387 em) ;
+// l'éditeur applique le même produit en CSS pour que l'écran corresponde au PDF.
+const INTERLIGNES = [1, 1.15, 1.35, 1.5, 2];
+const HAUTEUR_MARIANNE = 1.387;
+const lireInterligne = (v) => { const n = Math.round(parseFloat(v) * 100) / 100; return n >= 0.8 && n <= 3 ? n : null; };
+const virgule = (n) => String(n).replace(".", ",");
 const CONTENU_VIDE = { type: "doc", content: [
   { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Titre du document" }] },
   { type: "paragraph", content: [{ type: "text", text: "Tapez @ pour insérer un champ, ou cliquez sur un champ dans la colonne de gauche." }] }] };
@@ -565,6 +572,7 @@ function normaliserMep(brut) {
   if (FORMATS[brut.format]) m.format = brut.format;
   if (brut.orientation === "paysage") m.orientation = "paysage";
   m.police = borner(brut.police, 7, 16, MEP_DEFAUT.police);
+  m.interligne = lireInterligne(brut.interligne) ?? MEP_DEFAUT.interligne;
   for (const k of ["haut", "bas", "gauche", "droite"]) m.marges[k] = borner(brut.marges?.[k], 0, 60, MEP_DEFAUT.marges[k]);
   for (const k of ["g", "c", "d"]) {
     m.enTete[k] = String(brut.enTete?.[k] ?? "").slice(0, 120);
@@ -588,6 +596,7 @@ function remplirFormulaireMep() {
   $("mep-format").value = mep.format;
   $("mep-orientation").value = mep.orientation;
   $("mep-police").value = mep.police;
+  $("mep-interligne").value = String(mep.interligne);
   for (const k of ["haut", "bas", "gauche", "droite"]) $(`mep-${k}`).value = mep.marges[k];
   $("mep-eg").value = mep.enTete.g; $("mep-ec").value = mep.enTete.c; $("mep-ed").value = mep.enTete.d;
   $("mep-pg").value = mep.pied.g; $("mep-pc").value = mep.pied.c; $("mep-pd").value = mep.pied.d;
@@ -615,6 +624,7 @@ function lireFormulaireMep() {
   modeDoc = $("mep-mode").value === "Rapport" ? "Rapport" : "Fiche";
   mep = normaliserMep({
     format: $("mep-format").value, orientation: $("mep-orientation").value, police: $("mep-police").value,
+    interligne: $("mep-interligne").value,
     marges: { haut: $("mep-haut").value, bas: $("mep-bas").value, gauche: $("mep-gauche").value, droite: $("mep-droite").value },
     enTete: $("mep-sans-entete").checked ? {} : { g: $("mep-eg").value, c: $("mep-ec").value, d: $("mep-ed").value },
     pied: $("mep-sans-pied").checked ? {} : { g: $("mep-pg").value, c: $("mep-pc").value, d: $("mep-pd").value },
@@ -640,6 +650,7 @@ function appliquerMepEcran() {
   f.style.minHeight = `${d.h}mm`;
   f.style.padding = `${mep.marges.haut}mm ${mep.marges.droite}mm ${mep.marges.bas}mm ${mep.marges.gauche}mm`;
   f.style.fontSize = `${mep.police}pt`;
+  f.style.setProperty("--interligne", mep.interligne);
   const util = d.h - mep.marges.haut - mep.marges.bas;
   f.querySelector(".ProseMirror")?.style.setProperty("min-height", `${Math.max(util, 20)}mm`);
 }
@@ -659,7 +670,7 @@ function majApercuNom() {
   const rec = estRapport() ? enregistrements[0] : enregistrements[index];
   $("apercu-nom").textContent = rec ? nomFichierCalcule(rec) : "—";
 }
-["mep-mode", "mep-format", "mep-orientation", "mep-police", "mep-haut", "mep-bas", "mep-gauche", "mep-droite",
+["mep-mode", "mep-format", "mep-orientation", "mep-police", "mep-interligne", "mep-haut", "mep-bas", "mep-gauche", "mep-droite",
  "mep-eg", "mep-ec", "mep-ed", "mep-pg", "mep-pc", "mep-pd", "mep-sans-premiere", "mep-nom-fichier",
  "mep-sans-entete", "mep-sans-pied", "mep-col-libelle", "mep-archive", "mep-col-cle"]
   .forEach((id) => $(id).addEventListener("change", lireFormulaireMep));
@@ -1110,6 +1121,26 @@ async function initEditeur() {
     },
   }).configure({ resize: { enabled: true, directions: ["bottom-right", "bottom-left"], minWidth: 30, alwaysPreserveAspectRatio: true } });
 
+  // Interlignage propre à un paragraphe ou un titre (sinon : celui de la mise en page)
+  const Interligne = core.Extension.create({
+    name: "interligne",
+    addGlobalAttributes() {
+      return [{ types: ["paragraph", "heading"], attributes: { interligne: {
+        default: null,
+        parseHTML: (el) => lireInterligne(el.style.getPropertyValue("--interligne")),
+        renderHTML: (a) => (a.interligne ? { style: `--interligne: ${a.interligne}` } : {}),
+      } } }];
+    },
+    addCommands() {
+      return {
+        setInterligne: (v) => ({ commands }) =>
+          ["paragraph", "heading"].map((t) => commands.updateAttributes(t, { interligne: v })).some(Boolean),
+        unsetInterligne: () => ({ commands }) =>
+          ["paragraph", "heading"].map((t) => commands.resetAttributes(t, "interligne")).some(Boolean),
+      };
+    },
+  });
+
   const LigneRepetee = tb.TableRow.extend({
     addAttributes() {
       return {
@@ -1124,7 +1155,7 @@ async function initEditeur() {
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
       ts.TextStyle, ts.FontSize,
-      al.TextAlign.configure({ types: ["heading", "paragraph"] }),
+      al.TextAlign.configure({ types: ["heading", "paragraph"] }), Interligne,
       tb.Table.configure({ resizable: true }), LigneRepetee, tb.TableHeader, tb.TableCell,
       ImagePJ, Balise, SautPage, BlocConditionnel,
     ],
@@ -1280,7 +1311,7 @@ const CMD = {
   ligne: (c) => c.addRowAfter(), colonne: (c) => c.addColumnAfter(),
   supprLigne: (c) => c.deleteRow(), supprColonne: (c) => c.deleteColumn(), supprTableau: (c) => c.deleteTable(),
   saut: (c) => c.insertContent({ type: "sautPage" }),
-  effacer: (c) => c.unsetAllMarks().clearNodes(),
+  effacer: (c) => c.unsetAllMarks().clearNodes().unsetInterligne(),
 };
 const ACTIF = {
   gras: ["bold"], italique: ["italic"], souligne: ["underline"], barre: ["strike"],
@@ -1317,6 +1348,12 @@ function majOutils() {
   if (tailleTexte && ![...selT.options].some((o) => o.value === tailleTexte))
     selT.add(new Option(tailleTexte, tailleTexte), 1);
   selT.value = tailleTexte;
+  // Interlignage du paragraphe courant (vide = celui de la mise en page)
+  const il = editor.getAttributes(editor.isActive("heading") ? "heading" : "paragraph").interligne;
+  const selI = $("sel-interligne");
+  selI.options[0].textContent = `Défaut (${virgule(mep.interligne)})`;
+  if (il && ![...selI.options].some((o) => o.value === String(il))) selI.add(new Option(virgule(il), String(il)), 1);
+  selI.value = il ? String(il) : "";
 }
 $("outils").addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
 $("outils").addEventListener("click", (e) => {
@@ -1337,6 +1374,10 @@ $("sel-style").addEventListener("change", (e) => {
 $("sel-taille").addEventListener("change", (e) => {
   const v = e.target.value, c = editor.chain().focus();
   (v ? c.setFontSize(`${v}pt`) : c.unsetFontSize()).run();
+});
+$("sel-interligne").addEventListener("change", (e) => {
+  const v = lireInterligne(e.target.value), c = editor.chain().focus();
+  (v ? c.setInterligne(v) : c.unsetInterligne()).run();
 });
 
 // ── Menus flottants ──
@@ -1520,11 +1561,12 @@ $("sel-table").addEventListener("change", async (e) => { await choisirTable(Numb
 // ════════════════════════════════════════════════════════════════
 function cssContenu(s) {
   return `
-  ${s} { font-family: "Marianne", arial, sans-serif; line-height: 1.5; color: #161616; }
-  ${s} h1 { font-size: 1.8em; line-height: 1.25; font-weight: 700; margin: 0 0 4mm; color: #161616; }
-  ${s} h2 { font-size: 1.35em; line-height: 1.3; font-weight: 700; margin: 5mm 0 3mm; color: #161616; }
-  ${s} h3 { font-size: 1.15em; line-height: 1.35; font-weight: 700; margin: 4mm 0 2mm; color: #161616; }
-  ${s} p { margin: 0 0 3mm; font-size: inherit; line-height: inherit; }
+  ${s} { font-family: "Marianne", arial, sans-serif; color: #161616; }
+  ${s} p, ${s} h1, ${s} h2, ${s} h3 { line-height: calc(var(--interligne, ${MEP_DEFAUT.interligne}) * ${HAUTEUR_MARIANNE}); }
+  ${s} h1 { font-size: 1.8em; font-weight: 700; margin: 0 0 4mm; color: #161616; }
+  ${s} h2 { font-size: 1.35em; font-weight: 700; margin: 5mm 0 3mm; color: #161616; }
+  ${s} h3 { font-size: 1.15em; font-weight: 700; margin: 4mm 0 2mm; color: #161616; }
+  ${s} p { margin: 0 0 3mm; font-size: inherit; }
   ${s} p:empty { min-height: 1.5em; }
   ${s} ul, ${s} ol { margin: 0 0 3mm; padding-left: 6mm; }
   ${s} ul { list-style-type: disc; }
@@ -1541,8 +1583,7 @@ function cssContenu(s) {
   ${s} img[data-align="right"] { margin-left: auto; margin-right: 0; }
   ${s} [data-resize-container]:has(img[data-align="center"]) { margin-left: auto; margin-right: auto; width: fit-content; }
   ${s} [data-resize-container]:has(img[data-align="right"]) { margin-left: auto; margin-right: 0; width: fit-content; }
-  ${s} a { color: #000091; }
-  ${s} [style*="font-size"] { line-height: 1.35; }`;
+  ${s} a { color: #000091; }`;
 }
 document.head.insertAdjacentHTML("beforeend", `<style>${cssContenu(".feuille .ProseMirror")}</style>`);
 
@@ -1679,6 +1720,10 @@ function inlines(parent, herite = {}) {
   }
   return out.length ? out : [{ text: "" }];
 }
+function interligneDe(el) {
+  const v = lireInterligne(el?.style?.getPropertyValue("--interligne"));
+  return v ? { lineHeight: v } : {};
+}
 function alignementDe(el) {
   const a = el?.style?.textAlign;
   return a && a !== "left" ? { alignment: a } : {};
@@ -1755,12 +1800,12 @@ function blocPdf(el, base) {
       return [...el.children].flatMap((e) => blocPdf(e, base));
     const contenu = inlines(el);
     const vide = contenu.length === 1 && !contenu[0].text;
-    return [{ text: contenu, margin: [0, 0, 0, vide ? 1.5 * PT : 3 * PT], ...alignementDe(el) }];
+    return [{ text: contenu, margin: [0, 0, 0, vide ? 1.5 * PT : 3 * PT], ...alignementDe(el), ...interligneDe(el) }];
   }
   if (t === "H1" || t === "H2" || t === "H3") {
     const n = Number(t[1]);
     return [{ text: inlines(el), fontSize: base * TAILLES[t], bold: true,
-              margin: [0, n === 1 ? 0 : 5 * PT, 0, (n === 1 ? 4 : 3) * PT], ...alignementDe(el) }];
+              margin: [0, n === 1 ? 0 : 5 * PT, 0, (n === 1 ? 4 : 3) * PT], ...alignementDe(el), ...interligneDe(el) }];
   }
   if (t === "UL") return [{ ul: [...el.children].map((li) => elementsListe(li, base)), margin: [0, 0, 0, 3 * PT] }];
   if (t === "OL") return [{ ol: [...el.children].map((li) => elementsListe(li, base)), margin: [0, 0, 0, 3 * PT] }];
@@ -1799,7 +1844,7 @@ function documentPdfmake(html) {
     pageSize: (FORMATS[mep.format]?.css || "A4").toUpperCase(),
     pageOrientation: mep.orientation === "paysage" ? "landscape" : "portrait",
     pageMargins: [m.gauche * PT, m.haut * PT, m.droite * PT, m.bas * PT],
-    defaultStyle: { font: "Marianne", fontSize: mep.police, lineHeight: 1.35, color: "#161616" },
+    defaultStyle: { font: "Marianne", fontSize: mep.police, lineHeight: mep.interligne, color: "#161616" },
     header: (page, total) => (mep.sansPremiere && page === 1) ? null
       : zoneMarge(mep.enTete, page, total, Math.max(8, m.haut * PT - 24)),
     footer: (page, total) => (mep.sansPremiere && page === 1) ? null
