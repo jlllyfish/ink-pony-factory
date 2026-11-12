@@ -588,7 +588,9 @@ function remplirColLibelle() {
   $("mep-col-libelle").innerHTML = COLONNES.length
     ? COLONNES.map((c) => `<option value="${c.ref}">${esc(c.label)}</option>`).join("")
     : `<option value="">Aucune colonne</option>`;
-  if (!COLS.has(colLibelle)) colLibelle = COLONNES[0]?.ref ?? null;
+  // Relit toujours le choix enregistré (mep) : au chargement du modèle, les colonnes
+  // de la table ne sont pas encore connues et ne doivent pas écraser ce choix.
+  colLibelle = COLS.has(mep.colLibelle) ? mep.colLibelle : (COLONNES[0]?.ref ?? null);
   $("mep-col-libelle").value = colLibelle ?? "";
 }
 function remplirFormulaireMep() {
