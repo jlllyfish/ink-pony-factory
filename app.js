@@ -1530,10 +1530,10 @@ function majMode() {
 }
 function majNav() {
   const n = enregistrements.length;
-  $("sel-rec").innerHTML = n
-    ? enregistrements.map((r, i) => `<option value="${i}">${esc(libelleEnregistrement(r, i))}</option>`).join("")
-    : `<option>Aucun enregistrement</option>`;
-  $("sel-rec").value = String(index);
+  libellesRec = enregistrements.map((r, i) => libelleEnregistrement(r, i));
+  libellesNorm = libellesRec.map(normaliserRecherche);
+  if (document.activeElement === $("sel-rec") && !$("liste-rec").hidden) comboAfficher();
+  else if (document.activeElement !== $("sel-rec")) $("sel-rec").value = libelleCourant();
   $("compteur").textContent = !n ? "" : estRapport() ? `${n} ligne${n > 1 ? "s" : ""}` : `${index + 1} / ${n}`;
   if (!estRapport()) {
     $("btn-prec").disabled = index <= 0;
@@ -1553,7 +1553,79 @@ function allerA(i) {
 }
 $("btn-prec").addEventListener("click", () => allerA(index - 1));
 $("btn-suiv").addEventListener("click", () => allerA(index + 1));
-$("sel-rec").addEventListener("change", (e) => allerA(Number(e.target.value)));
+
+// Sélecteur d'enregistrement avec recherche (combobox)
+const COMBO_MAX = 200;
+let libellesRec = [], libellesNorm = [];
+let comboFiltre = "", comboVisibles = [], comboActif = -1;
+const normaliserRecherche = (s) => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const libelleCourant = () => (enregistrements.length ? libellesRec[index] ?? "" : "Aucun enregistrement");
+function comboAfficher() {
+  const input = $("sel-rec"), liste = $("liste-rec");
+  const q = normaliserRecherche(comboFiltre).trim();
+  comboVisibles = [];
+  for (let i = 0; i < libellesNorm.length; i++) if (!q || libellesNorm[i].includes(q)) comboVisibles.push(i);
+  // sans recherche : fenêtre centrée sur l'enregistrement courant
+  const debut = q ? 0 : Math.max(0, Math.min(index - 20, comboVisibles.length - COMBO_MAX));
+  const fenetre = comboVisibles.slice(debut, debut + COMBO_MAX);
+  if (!fenetre.includes(comboActif)) comboActif = fenetre.includes(index) ? index : (fenetre[0] ?? -1);
+  let html = fenetre.map((i) =>
+    `<li role="option" data-i="${i}" id="rec-opt-${i}"${i === comboActif ? ' class="actif"' : ""}${i === index ? ' aria-selected="true"' : ""}>${esc(libellesRec[i])}</li>`).join("");
+  const cachees = comboVisibles.length - fenetre.length;
+  if (!comboVisibles.length) html = `<li class="info">Aucun résultat</li>`;
+  else if (cachees > 0) html += `<li class="info">${cachees} autre${cachees > 1 ? "s" : ""} — affinez la recherche</li>`;
+  liste.innerHTML = html;
+  liste.querySelectorAll("li[aria-selected]").forEach((li) => li.classList.add("courant"));
+  liste.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  const actif = liste.querySelector("li.actif");
+  if (actif) { input.setAttribute("aria-activedescendant", actif.id); actif.scrollIntoView({ block: "nearest" }); }
+}
+function comboFermer(restaurer = true) {
+  $("liste-rec").hidden = true;
+  $("sel-rec").setAttribute("aria-expanded", "false");
+  $("sel-rec").removeAttribute("aria-activedescendant");
+  if (restaurer) $("sel-rec").value = libelleCourant();
+}
+function comboChoisir(i) {
+  comboFermer(false);
+  $("sel-rec").blur();
+  allerA(i);
+  $("sel-rec").value = libelleCourant();
+}
+function comboBouger(delta) {
+  if (!comboVisibles.length) return;
+  const rendus = [...$("liste-rec").querySelectorAll("li[data-i]")].map((li) => Number(li.dataset.i));
+  const pos = Math.max(0, Math.min(rendus.length - 1, rendus.indexOf(comboActif) + delta));
+  comboActif = rendus[pos];
+  comboAfficher();
+}
+$("sel-rec").addEventListener("focus", (e) => {
+  if (e.target.disabled || !enregistrements.length) return;
+  comboFiltre = "";
+  comboActif = index;
+  e.target.select();
+  comboAfficher();
+});
+$("sel-rec").addEventListener("input", (e) => { comboFiltre = e.target.value; comboActif = -1; comboAfficher(); });
+$("sel-rec").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if ($("liste-rec").hidden) { comboFiltre = ""; comboActif = index; comboAfficher(); }
+    else comboBouger(e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (!$("liste-rec").hidden && comboActif >= 0) comboChoisir(comboActif);
+  } else if (e.key === "Escape") {
+    comboFermer(); e.target.blur();
+  }
+});
+$("sel-rec").addEventListener("blur", () => comboFermer());
+$("liste-rec").addEventListener("mousedown", (e) => {
+  e.preventDefault(); // garde le focus pour éviter la fermeture avant le clic
+  const li = e.target.closest("li[data-i]");
+  if (li) comboChoisir(Number(li.dataset.i));
+});
 $("sel-table").addEventListener("change", async (e) => { await choisirTable(Number(e.target.value)); sauvegarder(true); });
 
 // ════════════════════════════════════════════════════════════════
