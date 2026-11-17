@@ -2083,25 +2083,65 @@ $("mep-archive").addEventListener("change", async () => {
   }
 });
 
-// Dépose un fichier dans les pièces jointes du document (jeton complet obligatoire)
-async function deposerPJ(blob, nom) {
+// Dépose des fichiers dans les pièces jointes du document (jeton complet obligatoire).
+// Grist accepte plusieurs champs « upload » dans une même requête et renvoie les id dans l'ordre :
+// un seul aller-retour et une seule action Grist pour tout le paquet.
+async function deposerPJs(fichiers) {
   let r, base;
+  const noms = fichiers.map((f) => f.nom).join(", ").slice(0, 80);
   for (const renouveler of [false, true]) {
     if (renouveler) JETONS.complet = null;   // jeton expiré pendant un long lot
     const { token, baseUrl } = await jeton(true);
     base = baseUrl;
     const fd = new FormData();
-    fd.append("upload", blob, nom);
+    for (const { blob, nom } of fichiers) fd.append("upload", blob, nom);
     // Avec un jeton ?auth=, Grist exige cet en-tête sur toute écriture (protection CSRF) :
     // sans lui, il répond 401 sans en-têtes CORS et le navigateur n'affiche que « Failed to fetch ».
     r = await fetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`,
       { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } });
     if (!refuse(r)) break;
   }
-  if (!r.ok) throw new Error(`Dépôt de ${nom} : HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
-  const [id] = await r.json();
-  if (!Number.isInteger(id)) throw new Error(`Dépôt de ${nom} : réponse inattendue de Grist`);
-  return { id, url: `${base}/attachments/${id}/download` };
+  if (!r.ok) throw new Error(`Dépôt de ${noms} : HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
+  const ids = await r.json();
+  if (!Array.isArray(ids) || ids.length !== fichiers.length || !ids.every(Number.isInteger))
+    throw new Error(`Dépôt de ${noms} : réponse inattendue de Grist`);
+  return ids.map((id) => ({ id, url: `${base}/attachments/${id}/download` }));
+}
+
+// Envoi au fil de l'eau : les PDF partent par paquets pendant que les suivants se génèrent.
+const PAQUET_MAX_FICHIERS = 10, PAQUET_MAX_OCTETS = 8 * 1024 * 1024, ENVOIS_SIMULTANES = 2;
+function creerDepot() {
+  const resultats = [];          // { id, url } par fichier, dans l'ordre d'ajout
+  const envois = new Set();
+  let paquet = [], debut = 0, octets = 0, erreur = null, faits = 0, total = 0;
+  async function envoyer(liste, from) {
+    while (envois.size >= ENVOIS_SIMULTANES) await Promise.race(envois);
+    const p = deposerPJs(liste)
+      .then((pjs) => { pjs.forEach((pj, i) => (resultats[from + i] = pj)); faits += liste.length; })
+      .catch((e) => { erreur ??= e; })
+      .finally(() => envois.delete(p));
+    envois.add(p);
+  }
+  async function vider() {
+    if (!paquet.length || erreur) return;
+    const liste = paquet, from = debut;
+    paquet = []; debut += liste.length; octets = 0;
+    await envoyer(liste, from);
+  }
+  return {
+    async ajouter(f) {
+      total++;
+      paquet.push(f); octets += f.blob.size;
+      if (paquet.length >= PAQUET_MAX_FICHIERS || octets >= PAQUET_MAX_OCTETS) await vider();
+    },
+    get avancement() { return `${faits} / ${total}`; },
+    async terminer() {
+      await vider();
+      while (envois.size) await Promise.race(envois);
+      if (erreur) throw erreur;
+      return resultats;
+    },
+  };
 }
 
 // Calcule les clés d'archive avant toute génération ; refuse les clés vides ou en double,
@@ -2131,15 +2171,16 @@ function planArchive(recs) {
   return plan;
 }
 // Dépose les PDF puis crée ou remplace les lignes d'archive en une seule action Grist
-async function archiver(plan, fichiers) {
+async function archiver(plan, fichiers, depot = null) {
   await assurerTableDocs();
+  if (!depot) { depot = creerDepot(); for (const f of fichiers) await depot.ajouter(f); }
+  const pjs = await depot.terminer();
   const existants = colonnesEnLignes(await grist.docApi.fetchTable(TABLE_DOCS));
   const parCle = new Map(existants.filter((d) => d[COLS_DOC.modele] === modele.id).map((d) => [String(d[COLS_DOC.cle] ?? ""), d.id]));
   const ajouts = [], remplaces = [];
   for (let i = 0; i < plan.length; i++) {
-    if (plan.length > 1) statut(`Archivage ${i + 1} / ${plan.length}…`);
-    const { blob, nom } = fichiers[i];
-    const pj = await deposerPJ(blob, nom);
+    const { nom } = fichiers[i];
+    const pj = pjs[i];
     const ligne = {
       [COLS_DOC.cle]: plan[i].cle, [COLS_DOC.fichier]: ["L", pj.id], [COLS_DOC.lien]: `${nom} ${pj.url}`,
       [COLS_DOC.modele]: modele.id, [COLS_DOC.table]: tableCourante?.tableId ?? "", [COLS_DOC.ligne]: plan[i].ligne,
@@ -2161,8 +2202,8 @@ function bilanArchive(b) {
   return `${n} PDF archivé(s) dans ${TABLE_DOCS}${b.remplaces ? ` (${b.remplaces} remplacé(s))` : ""}`;
 }
 // Le téléchargement a déjà eu lieu : un échec ici ne doit pas passer pour un échec de génération
-async function archiverApresTelechargement(plan, fichiers) {
-  try { finir(bilanArchive(await archiver(plan, fichiers))); }
+async function archiverApresTelechargement(plan, fichiers, depot = null) {
+  try { finir(bilanArchive(await archiver(plan, fichiers, depot))); }
   catch (e) { console.error(e); statut(""); alerte(`PDF téléchargé, mais archivage dans ${TABLE_DOCS} impossible : ${e.message}`); }
 }
 function echec(e) {
@@ -2207,11 +2248,12 @@ $("btn-lot-zip").addEventListener("click", async () => {
   try {
     if (!globalThis.JSZip) throw new Error("JSZip n'est pas chargé.");
     const plan = planArchive(enregistrements);
+    const depot = plan ? creerDepot() : null;
     const zip = new JSZip();
     const vus = new Map();
     const fichiers = [];
     for (let i = 0; i < n; i++) {
-      statut(`Génération ${i + 1} / ${n}…`);
+      statut(`Génération ${i + 1} / ${n}…${depot ? ` · archivé ${depot.avancement}` : ""}`);
       const blob = await blobDe(await genererPdf([enregistrements[i]]));
       const nomBase = nomFichierCalcule(enregistrements[i]);
       let nom = nomBase;
@@ -2220,11 +2262,13 @@ $("btn-lot-zip").addEventListener("click", async () => {
       if (compte > 1) nom = nomBase.replace(/\.pdf$/, `-${compte}.pdf`);
       zip.file(nom, blob);
       fichiers.push({ blob, nom });
+      await depot?.ajouter({ blob, nom });
     }
     statut("Compression de l'archive…");
     telecharger(await zip.generateAsync({ type: "blob" }), `${nomLot()}.zip`);
     if (!plan) return finir(`${n} fichier(s) dans l'archive`);
-    await archiverApresTelechargement(plan, fichiers);
+    statut("Archivage…");
+    await archiverApresTelechargement(plan, fichiers, depot);
   } catch (e) { echec(e); }
 });
 
