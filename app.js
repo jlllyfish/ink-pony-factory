@@ -697,9 +697,6 @@ function appliquerMode() {
   $("btn-repetee").hidden = !r;
   $("btn-lot-un").hidden = r;
   $("btn-lot-zip").hidden = r;
-  $("btn-pdf").innerHTML = r
-    ? `<i class="ri-file-download-line"></i>&nbsp;Télécharger le rapport`
-    : `<i class="ri-file-download-line"></i>&nbsp;Télécharger`;
   ["btn-prec", "btn-suiv", "sel-rec"].forEach((i) => ($(i).disabled = r));
   $("bloc-nav").style.opacity = r ? ".5" : "1";
   $("bloc-nav").title = r ? "En mode Rapport, toutes les lignes affichées sont utilisées." : "";
@@ -1542,8 +1539,16 @@ function majNav() {
     $("btn-suiv").disabled = index >= n - 1;
   }
   ["btn-pdf", "btn-lot-un", "btn-lot-zip"].forEach((b) => ($(b).disabled = !n));
+  // Quand l'archivage est actif, les boutons qui archivent le disent
+  const arch = mep.archive;
+  const tag = arch ? `<span class="tag-archive">+ archive</span>` : "";
+  const bulle = arch ? `Le PDF est aussi enregistré dans ${TABLE_DOCS}` : "";
+  $("btn-pdf").innerHTML = `<i class="ri-file-download-line"></i>&nbsp;Télécharger${estRapport() ? " le rapport" : ""}${tag}`;
+  $("btn-pdf").title = bulle;
+  $("btn-lot-zip").innerHTML = `<i class="ri-folder-zip-line"></i>&nbsp;${n} PDF séparés${tag}`;
+  $("btn-lot-zip").title = arch ? `Chaque PDF est aussi enregistré dans ${TABLE_DOCS}` : "";
   $("btn-lot-un").innerHTML = `<i class="ri-file-copy-2-line"></i>&nbsp;1 PDF de ${n} page${n > 1 ? "s" : ""}`;
-  $("btn-lot-zip").innerHTML = `<i class="ri-folder-zip-line"></i>&nbsp;${n} PDF séparés`;
+  $("btn-lot-un").title = arch ? `Ce PDF n'est pas archivé dans ${TABLE_DOCS}` : "";
   majApercuNom();
   if (enApercu) rafraichirApercu();
 }
