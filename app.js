@@ -909,13 +909,16 @@ function afficherChamps() {
     ? liste.map((c) => tagHtml({ ref: c.ref, libelle: c.label, type: c.type, colId: c.colId, titre: `${c.colId} (${typeBase(c.type)})` })).join("")
     : `<p class="aide">${COLONNES.length ? "Aucun champ ne correspond." : "Choisissez une table source."}</p>`;
 }
+const BALISE_DATE = { ref: null, fonc: "datejour", libelle: "Date du jour", titre: "Date de génération du PDF" };
 function afficherCalculs() {
+  $("bloc-fiche").hidden = estRapport();
+  $("liste-speciales").innerHTML = tagHtml(BALISE_DATE);
   if (!estRapport()) return;
   const fonc = $("sel-fonction").value;
   const num = COLONNES.filter(estNumerique);
   const items = [
     { ref: null, fonc: "nb", libelle: "Nombre de lignes", titre: "Nombre de lignes affichées" },
-    { ref: null, fonc: "datejour", libelle: "Date du jour", titre: "Date du jour" },
+    BALISE_DATE,
     ...num.map((c) => ({ ref: c.ref, fonc, libelle: libelleBalise(c.ref, fonc), titre: `${FONCTIONS[fonc]} de ${c.colId}` })),
   ];
   $("liste-calculs").innerHTML = items.map(tagHtml).join("")
@@ -928,7 +931,7 @@ function insererBalise(item, chaine = editor.chain().focus()) {
     { type: "text", text: " " },
   ]).run();
 }
-for (const zone of ["liste-champs", "liste-calculs"]) {
+for (const zone of ["liste-champs", "liste-calculs", "liste-speciales"]) {
   $(zone).addEventListener("click", (e) => {
     const b = e.target.closest("[data-ref]");
     if (!b || !editor) return;
@@ -951,7 +954,7 @@ function itemsSuggestion(query) {
        { ref: null, fonc: "datejour", libelle: "Date du jour", colId: "calcul" },
        ...COLONNES.filter(estNumerique).flatMap((c) =>
          Object.keys(FONCTIONS).map((f) => ({ ref: c.ref, fonc: f, libelle: libelleBalise(c.ref, f), colId: c.colId, type: c.type })))]
-    : [];
+    : [{ ref: null, fonc: "datejour", libelle: "Date du jour", colId: "date" }];
   return [...champs, ...calculs]
     .filter((it) => !q || norm(it.libelle).split(/\s+/).some((w) => w.startsWith(q)) || norm(it.colId).startsWith(q))
     .slice(0, 12);
