@@ -2316,10 +2316,56 @@ $("version-widget").textContent = `ink ${VERSION}`;
 // onEditOptions : affiche le bouton « Ouvrir la configuration » dans le panneau de Grist
 grist.ready({ requiredAccess: "full", onEditOptions: () => afficherMep(true) });
 
+// ── Colonnes ajoutées, supprimées, renommées ou retypées dans Grist ──
+// Les métadonnées ne sont lues qu'au démarrage : on les relit quand les données liées révèlent
+// un changement de colonnes, et quand on revient dans le widget (cas d'une table non liée).
+const signatureCols = (ref) => JSON.stringify(colonnesDe(ref).map((c) => [c.ref, c.colId, c.label, c.type, c.displayColId]));
+let relectureCols = null;
+function rafraichirColonnes() {
+  if (!pret) return Promise.resolve();
+  relectureCols ??= (async () => {
+    try {
+      const avant = tableCourante ? signatureCols(tableCourante.ref) : "";
+      const tablesAvant = TABLES.map((t) => `${t.ref}:${t.tableId}`).join();
+      await chargerMeta();
+      if (TABLES.map((t) => `${t.ref}:${t.tableId}`).join() !== tablesAvant) remplirTables();
+      if (tableCourante) tableCourante = TABLES.find((t) => t.ref === tableCourante.ref) || tableCourante;
+      $("sel-table").value = tableCourante ? String(tableCourante.ref) : "";
+      if (!tableCourante || signatureCols(tableCourante.ref) === avant) return;
+      COLONNES = colonnesDe(tableCourante.ref);
+      COLS = new Map(COLONNES.map((c) => [c.ref, c]));
+      afficherChamps();
+      afficherCalculs();
+      remplirColLibelle();
+      remplirColCle();
+      rafraichirTags();
+      await chargerEnregistrements();   // une table non liée doit être relue pour avoir la nouvelle colonne
+      if (enApercu) rafraichirApercu();
+    } catch (e) { console.warn("[ink] relecture des colonnes", e); }
+    finally { relectureCols = null; }
+  })();
+  return relectureCols;
+}
+function colonnesChangees(recs) {
+  if (!tableCourante || !recs?.length) return false;
+  const connues = new Set(META_COLS.filter((c) => c.parent === tableCourante.ref).map((c) => c.colId));
+  const recues = Object.keys(recs[0]).filter((k) => k !== "id");
+  return recues.some((k) => !connues.has(k))
+    || COLONNES.some((c) => !(c.colId in recs[0]));
+}
+let derniereRelecture = 0;
+window.addEventListener("focus", () => {
+  if (Date.now() - derniereRelecture < 2000) return;
+  derniereRelecture = Date.now();
+  rafraichirColonnes();
+});
+
 grist.onRecords(async (recs) => {
   recsLies = recs || [];
   tableLiee = grist.getSelectedTableIdSync?.() ?? tableLiee;
-  if (pret && tableCourante && tableCourante.tableId === tableLiee) await chargerEnregistrements();
+  if (!pret || !tableCourante || tableCourante.tableId !== tableLiee) return;
+  if (colonnesChangees(recsLies)) await rafraichirColonnes();
+  await chargerEnregistrements();
 }, { includeColumns: "normal" });
 
 grist.onRecord((rec) => {
